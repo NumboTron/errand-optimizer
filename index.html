@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ErrandOptimizer - Smart Routing</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        /* Custom scrollbar for task list */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+        
+        #map {
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans min-h-screen flex flex-col">
+
+    <header class="bg-blue-600 text-white shadow-md p-4 flex items-center justify-between z-20 relative">
+        <div class="flex items-center gap-2 text-xl font-bold">
+            <i class="ph ph-map-trifold text-3xl"></i>
+            ErrandOptimizer
+        </div>
+        <div class="text-sm font-medium opacity-80">Time & Fuel Efficient Routing</div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden h-[calc(100vh-68px)]">
+        
+        <!-- Sidebar / Controls -->
+        <aside class="w-full md:w-[400px] bg-white shadow-[4px_0_10px_rgba(0,0,0,0.05)] z-20 flex flex-col overflow-y-auto">
+            
+            <div class="p-5 border-b border-slate-200">
+                <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+                    <i class="ph ph-flag-checkered text-blue-500 text-xl"></i>
+                    Starting Point
+                </h2>
+                <input type="text" id="start-location" placeholder="E.g., 123 Main St, City" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all">
+            </div>
+
+            <div class="p-5 border-b border-slate-200 flex-1 flex flex-col">
+                <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
+                    <i class="ph ph-list-checks text-blue-500 text-xl"></i>
+                    Errand Locations
+                </h2>
+                
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="new-task" placeholder="Add location (e.g., Post Office)" class="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all" onkeypress="handleEnter(event)">
+                    <button onclick="addTask()" class="bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors flex items-center justify-center">
+                        <i class="ph ph-plus font-bold"></i>
+                    </button>
+                </div>
+
+                <!-- Task List -->
+                <ul id="task-list" class="flex-1 overflow-y-auto custom-scrollbar space-y-2 mb-4 pr-1">
+                    <!-- Tasks will be injected here -->
+                </ul>
+
+                <button onclick="optimizeRoute()" id="optimize-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 mt-auto">
+                    <i class="ph ph-magic-wand"></i>
+                    <span>Optimize Route</span>
+                </button>
+            </div>
+
+            <!-- Results Panel (Hidden by default) -->
+            <div id="results-panel" class="hidden p-5 bg-green-50 flex-col animate-[fadeIn_0.3s_ease-out]">
+                <h2 class="text-lg font-bold text-green-800 mb-3 flex items-center gap-2">
+                    <i class="ph ph-route text-xl"></i>
+                    Optimized Itinerary
+                </h2>
+                <ol id="itinerary-list" class="list-decimal list-inside text-sm text-green-900 space-y-2">
+                    <!-- Itinerary items injected here -->
+                </ol>
+            </div>
+            
+        </aside>
+
+        <!-- Map Area -->
+        <section class="flex-1 relative bg-slate-200">
+            <div id="map" class="absolute inset-0"></div>
+            
+            <!-- Loading Overlay -->
+            <div id="loading-overlay" class="absolute inset-0 bg-white/80 backdrop-blur-sm z-[1000] hidden flex-col items-center justify-center">
+                <i class="ph ph-spinner-gap text-5xl text-blue-600 animate-spin mb-4"></i>
+                <h3 id="loading-text" class="text-lg font-bold text-slate-700">Geocoding locations...</h3>
+                <p class="text-sm text-slate-500 mt-2">This may take a moment.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- Custom Message Box -->
+    <div id="message-box" class="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 transition-all transform translate-y-20 opacity-0 z-[2000]">
+        <i id="message-icon" class="ph ph-info text-xl"></i>
+        <span id="message-text">Message goes here</span>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        // --- State Management ---
+        let tasks = [];
+        let map;
+        let routeLayerGroup;
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            // Pre-fill some data for testing if empty
+            document.getElementById('start-location').value = "Dubai Marina, Dubai";
+            tasks = ["Dubai Mall", "Burj Khalifa", "Jumeirah Beach"];
+            renderTasks();
+        });
+
+        // Initialize Leaflet Map
+        function initMap() {
+            // Default center: Dubai
+            map = L.map('map').setView([25.2048, 55.2708], 11);
+            
+            // Using Esri World Street Map for reliable, API-key-free tiles
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012'
+            }).addTo(map);
+
+            routeLayerGroup = L.layerGroup().addTo(map);
+        }
+
+        // --- UI Interactions ---
+
+        function handleEnter(e) {
+            if (e.key === 'Enter') {
+                addTask();
+            }
+        }
+
+        function addTask() {
+            const input = document.getElementById('new-task');
+            const val = input.value.trim();
+            if (val) {
+                tasks.push(val);
+                input.value = '';
+                renderTasks();
+            }
+        }
+
+        function removeTask(index) {
+            tasks.splice(index, 1);
+            renderTasks();
+        }
+
+        function renderTasks() {
+            const list = document.getElementById('task-list');
+            list.innerHTML = '';
+            
+            if (tasks.length === 0) {
+                list.innerHTML = '<p class="text-sm text-slate-400 italic mt-2 text-center">No locations added yet.</p>';
+                return;
+            }
+
+            tasks.forEach((task, index) => {
+                const li = document.createElement('li');
+                li.className = 'flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-sm';
+                li.innerHTML = `
+                    <div class="flex items-center gap-2 overflow-hidden">
+                        <i class="ph ph-map-pin text-slate-400"></i>
+                        <span class="truncate font-medium text-slate-700" title="${task}">${task}</span>
+                    </div>
+                    <button onclick="removeTask(${index})" class="text-red-400 hover:text-red-600 transition-colors p-1" title="Remove">
+                        <i class="ph ph-trash text-lg"></i>
+                    </button>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        // --- Custom Message System (No Alerts) ---
+        function showMessage(msg, isError = false) {
+            const box = document.getElementById('message-box');
+            const text = document.getElementById('message-text');
+            const icon = document.getElementById('message-icon');
+            
+            text.textContent = msg;
+            
+            if (isError) {
+                box.classList.replace('bg-slate-800', 'bg-red-600');
+                icon.className = 'ph ph-warning-circle text-xl';
+            } else {
+                box.classList.replace('bg-red-600', 'bg-slate-800');
+                icon.className = 'ph ph-info text-xl';
+            }
+
+            box.classList.remove('translate-y-20', 'opacity-0');
+            
+            setTimeout(() => {
+                box.classList.add('translate-y-20', 'opacity-0');
+            }, 4000);
+        }
+
+        // --- Geocoding Function (Nominatim) ---
+        async function geocodeLocation(query) {
+            try {
+                // Nominatim free API - added email parameter to comply with usage policy
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&email=errandoptimizer@example.com`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    return {
+                        name: query,
+                        display_name: data[0].display_name,
+                        lat: parseFloat(data[0].lat),
+                        lon: parseFloat(data[0].lon)
+                    };
+                }
+                return null;
+            } catch (err) {
+                console.error("Geocoding error for:", query, err);
+                return null;
+            }
+        }
+
+        // Haversine distance formula (in km)
+        function getDistance(p1, p2) {
+            const R = 6371; // Earth's radius in km
+            const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+            const dLon = (p2.lon - p1.lon) * Math.PI / 180;
+            const a = 
+                Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) * 
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        // Nearest Neighbor TSP Implementation
+        function optimizeTSP(startNode, locationsNodes) {
+            let current = startNode;
+            let unvisited = [...locationsNodes];
+            let route = [startNode];
+
+            while(unvisited.length > 0) {
+                let nearestIdx = 0;
+                let minDist = getDistance(current, unvisited[0]);
+                
+                for(let i = 1; i < unvisited.length; i++) {
+                    let dist = getDistance(current, unvisited[i]);
+                    if(dist < minDist) {
+                        minDist = dist;
+                        nearestIdx = i;
+                    }
+                }
+                
+                current = unvisited[nearestIdx];
+                route.push(current);
+                unvisited.splice(nearestIdx, 1);
+            }
+            
+            return route;
+        }
+
+        // --- Main Orchestration ---
+        async function optimizeRoute() {
+            const startInput = document.getElementById('start-location').value.trim();
+            
+            if (!startInput) {
+                showMessage("Please enter a starting location.", true);
+                return;
+            }
+            if (tasks.length === 0) {
+                showMessage("Please add at least one errand location.", true);
+                return;
+            }
+
+            // Show Loader
+            const loader = document.getElementById('loading-overlay');
+            const loaderText = document.getElementById('loading-text');
+            loader.classList.replace('hidden', 'flex');
+            
+            try {
+                // 1. Geocode Start Location
+                loaderText.textContent = "Locating starting point...";
+                const startNode = await geocodeLocation(startInput);
+                if (!startNode) {
+                    throw new Error(`Could not find starting point: ${startInput}`);
+                }
+
+                // 2. Geocode Tasks sequentially to respect API rate limits
+                const locationsNodes = [];
+                for (let i = 0; i < tasks.length; i++) {
+                    loaderText.textContent = `Finding: ${tasks[i]} (${i+1}/${tasks.length})...`;
+                    // Brief pause to prevent hitting Nominatim's strict 1 req/sec limit too hard
+                    await new Promise(r => setTimeout(r, 600)); 
+                    
+                    const locNode = await geocodeLocation(tasks[i]);
+                    if (!locNode) {
+                        throw new Error(`Could not find location: ${tasks[i]}`);
+                    }
+                    locationsNodes.push(locNode);
+                }
+
+                // 3. Optimize Route (TSP)
+                loaderText.textContent = "Calculating optimal route...";
+                const optimizedRoute = optimizeTSP(startNode, locationsNodes);
+
+                // 4. Draw on Map
+                drawRouteOnMap(optimizedRoute);
+
+                // 5. Update UI Itinerary
+                showItinerary(optimizedRoute);
+                
+                showMessage("Route optimized successfully!");
+
+            } catch (error) {
+                showMessage(error.message, true);
+            } finally {
+                // Hide Loader
+                loader.classList.replace('flex', 'hidden');
+            }
+        }
+
+        function drawRouteOnMap(routeNodes) {
+            routeLayerGroup.clearLayers();
+            
+            const latlngs = [];
+            
+            routeNodes.forEach((node, index) => {
+                const latlng = [node.lat, node.lon];
+                latlngs.push(latlng);
+                
+                // Determine marker style
+                let markerColor = index === 0 ? 'red' : 'blue';
+                let iconHtml = `<div class="bg-${index === 0 ? 'red' : 'blue'}-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold shadow-lg border-2 border-white transform -translate-x-1/2 -translate-y-full origin-bottom">
+                                    ${index === 0 ? 'S' : index}
+                                </div>`;
+                
+                const customIcon = L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-div-icon',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 32] // Anchor at bottom center
+                });
+
+                const popupText = index === 0 ? `<strong>Start:</strong> ${node.name}` : `<strong>Stop ${index}:</strong> ${node.name}<br><span class="text-xs text-slate-500">${node.display_name}</span>`;
+
+                L.marker(latlng, {icon: customIcon})
+                    .bindPopup(popupText)
+                    .addTo(routeLayerGroup);
+            });
+
+            // Draw connecting lines
+            const polyline = L.polyline(latlngs, {
+                color: '#3b82f6', // blue-500
+                weight: 5,
+                opacity: 0.7,
+                dashArray: '10, 10',
+                lineJoin: 'round'
+            }).addTo(routeLayerGroup);
+
+            // Fit map to show entire route
+            map.fitBounds(polyline.getBounds(), { padding: [50, 50] });
+        }
+
+        function showItinerary(routeNodes) {
+            const panel = document.getElementById('results-panel');
+            const list = document.getElementById('itinerary-list');
+            
+            list.innerHTML = '';
+            
+            // Skip start node (index 0) for the list of *errands*, but list it as "Start"
+            routeNodes.forEach((node, index) => {
+                const li = document.createElement('li');
+                li.className = "py-1 border-b border-green-200 last:border-0";
+                
+                if (index === 0) {
+                    li.innerHTML = `<span class="font-bold">Start:</span> ${node.name}`;
+                } else {
+                    // Calculate distance from previous point
+                    const dist = getDistance(routeNodes[index-1], node);
+                    li.innerHTML = `<span class="font-semibold">${node.name}</span> <span class="text-xs opacity-75">(~${dist.toFixed(1)} km)</span>`;
+                }
+                list.appendChild(li);
+            });
+
+            panel.classList.remove('hidden');
+            panel.classList.add('flex');
+        }
+    </script>
+</body>
+</html>
